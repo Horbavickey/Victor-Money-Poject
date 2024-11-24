@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 namespace Victor_Project_1
 {
@@ -11,32 +11,38 @@ namespace Victor_Project_1
 
     public class Money : IEquatable<Money>, IComparable<Money>
     {
-        private char _sign;
-        private int _integerPart;
-        private int _fractionalPart;
-        private Currency _currency;
+        private char _sign; // '+' or '-'
+        private uint _integerPart; // non-negative whole number
+        private uint _fractionalPart; // non-negative between 0-99
+        private Currency _currency; // USD, RUB, EUR
 
         private const int FractionMax = 100;
 
         public char Sign
         {
             get { return _sign; }
-            set { _sign = value; }
+            set
+            {
+                // for us to validate only for + and -
+                if (value != '+' && value != '-')
+                    throw new ArgumentException("the sign must be '+' or '-'.", nameof(value));
+                _sign = value;
+            }
         }
 
-        public int IntegerPart
+        public uint IntegerPart
         {
             get { return _integerPart; }
-            set { _integerPart = value; }
+            set { _integerPart = value; } // no need to validate since uint can't be negative
         }
 
-        public int FractionalPart
+        public uint FractionalPart
         {
             get { return _fractionalPart; }
             set
             {
-                if (value < 0 || value >= FractionMax)
-                    throw new ArgumentOutOfRangeException(nameof(value), "Fractional part must be between 0 and 99.");
+                if (value >= FractionMax) // to check if fractional part exceeds the allowed range
+                    throw new ArgumentOutOfRangeException(nameof(value), "The fractional part must be between 0-99.");
                 _fractionalPart = value;
             }
         }
@@ -47,45 +53,60 @@ namespace Victor_Project_1
             set { _currency = value; }
         }
 
-        // Default constructor
+        // Default constructor to ensure that the sign is validated against invalid character
         public Money()
         {
             Random rnd = new Random();
             _sign = rnd.Next(2) == 0 ? '+' : '-';
-            _integerPart = rnd.Next(0, 1000);
-            _fractionalPart = rnd.Next(0, 100);
+            _integerPart = (uint)rnd.Next(0, 1000);
+            _fractionalPart = (uint)rnd.Next(0, 100);
             _currency = (Currency)rnd.Next(Enum.GetValues(typeof(Currency)).Length);
         }
 
         // Constructor with parameters
-        public Money(Currency currency, char sign, int integer, int fractional)
+        public Money(Currency currency, char sign, uint integer, uint fractional)
         {
-            _currency = currency;
-            _sign = sign;
-            _integerPart = integer;
-            FractionalPart = fractional;
+            CurrencyType = currency;
+            Sign = sign; // Validate sign
+            IntegerPart = integer; // No validation needed for integer since it's uint
+            FractionalPart = fractional; // Validate fractional part
         }
 
-        // Copy constructor
+        // Copy constructor from stack overflow
         public Money(Money other)
         {
+            if (other == null)
+                throw new ArgumentNullException(nameof(other));
+
             _sign = other._sign;
             _integerPart = other._integerPart;
             _fractionalPart = other._fractionalPart;
             _currency = other._currency;
         }
 
-        // String-based constructor
+        // String-based constructor from stack overflow
+        // added checks to ensure the input format is correct and that it handles invalid inputs
         public Money(string value)
         {
             if (string.IsNullOrWhiteSpace(value))
-                throw new ArgumentException("Input cannot be empty or null", nameof(value));
+                throw new ArgumentException("Your input cannot be null", nameof(value));
 
+            // Validate and assign the sign
             _sign = value[0];
-            var parts = value.Substring(1).Split(new[] { '.', ' ' }, StringSplitOptions.RemoveEmptyEntries);
-            _integerPart = int.Parse(parts[0]);
-            _fractionalPart = int.Parse(parts[1]);
-            _currency = (Currency)Enum.Parse(typeof(Currency), parts[2]);
+            if (_sign != '+' && _sign != '-')
+                throw new ArgumentException("The first character must be '+' or '-'.", nameof(value));
+
+            var parts = value.Substring(1).Split(new[] { '.', ',' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length != 3) // Check for correct format
+                throw new ArgumentException("Input must be in the format '+100.25 USD'", nameof(value));
+
+            // Parse integer and fractional parts as unsigned integers
+            _integerPart = uint.Parse(parts[0]);
+            _fractionalPart = uint.Parse(parts[1]);
+            if (_fractionalPart >= FractionMax)
+                throw new ArgumentOutOfRangeException(nameof(value), "Fractional part must be between 0-99.");
+
+            _currency = Enum.Parse<Currency>(parts[2], true);
         }
 
         // Display method
@@ -95,60 +116,54 @@ namespace Victor_Project_1
         }
 
         // Addition of integer and fractional values
-        public void Add(char sign, int integer, int fractional)
+        public void Add(char sign, uint integer, uint fractional)
         {
             if (sign == '-')
             {
-                _integerPart -= integer;
-                _fractionalPart -= fractional;
+                Subtract('+', integer, fractional); // delegate to subtraction logic
             }
             else
             {
                 _integerPart += integer;
                 _fractionalPart += fractional;
+                AdjustForFractionOverflow();
             }
-            AdjustForFractionOverflow();
-            UpdateSign();
         }
 
-        // Add another Money object
-        public void Add(Money other)
-        {
-            Add(other._sign, other._integerPart, other._fractionalPart);
-        }
-
-        // Subtract integer and fractional values
-        public void Subtract(char sign, int integer, int fractional)
+        // Subtract integer and fractional values from stack overflow
+        public void Subtract(char sign, uint integer, uint fractional)
         {
             if (sign == '+')
             {
+                if (_integerPart < integer || (_integerPart == integer && _fractionalPart < fractional))
+                    throw new InvalidOperationException("Cannot subtract more than the current amount.");
+
+                if (_fractionalPart < fractional)
+                {
+                    _integerPart -= 1; // Borrow from the integer part
+                    _fractionalPart += FractionMax;
+                }
                 _integerPart -= integer;
                 _fractionalPart -= fractional;
             }
             else
             {
-                _integerPart += integer;
-                _fractionalPart += fractional;
+                Add('+', integer, fractional); // Delegate to the addition logic
             }
-            AdjustForFractionOverflow();
-            UpdateSign();
-        }
-
-        // Subtract another Money object
-        public void Subtract(Money other)
-        {
-            Subtract(other._sign == '+' ? '-' : '+', other._integerPart, other._fractionalPart);
         }
 
         // Equality check from stack overflow
-        public bool Equals(Money other)
+        public bool Equals(Money? other)
         {
             if (other == null) return false;
-            return _sign == other._sign && _integerPart == other._integerPart && _fractionalPart == other._fractionalPart && _currency == other._currency;
+            return _sign == other._sign
+                && _integerPart == other._integerPart
+                && _fractionalPart == other._fractionalPart
+                && _currency == other._currency;
         }
 
-        //using Comparison method from stack overflow
-        public int CompareTo(Money other)
+        // Using Comparison method from stack overflow
+        public int CompareTo(Money? other)
         {
             if (other == null) throw new ArgumentNullException(nameof(other));
 
@@ -165,7 +180,7 @@ namespace Victor_Project_1
         public Money Sum(Money other)
         {
             Money result = new Money(this);
-            result.Add(other);
+            result.Add(other._sign, other._integerPart, other._fractionalPart);
             return result;
         }
 
@@ -173,11 +188,11 @@ namespace Victor_Project_1
         public Money Difference(Money other)
         {
             Money result = new Money(this);
-            result.Subtract(other);
+            result.Subtract(other._sign, other._integerPart, other._fractionalPart);
             return result;
         }
 
-        // to coonvert to another currency
+        // to convert to another currency
         public Money ConvertToCurrency(Currency targetCurrency, decimal exchangeRate)
         {
             if (exchangeRate <= 0)
@@ -189,8 +204,8 @@ namespace Victor_Project_1
             char newSign = convertedAmount < 0 ? '-' : '+';
             convertedAmount = Math.Abs(convertedAmount);
 
-            int newInteger = (int)convertedAmount;
-            int newFractional = (int)((convertedAmount - newInteger) * FractionMax);
+            uint newInteger = (uint)convertedAmount;
+            uint newFractional = (uint)((convertedAmount - newInteger) * FractionMax);
 
             return new Money(targetCurrency, newSign, newInteger, newFractional);
         }
@@ -203,25 +218,6 @@ namespace Victor_Project_1
                 _integerPart += _fractionalPart / FractionMax;
                 _fractionalPart %= FractionMax;
             }
-            else if (_fractionalPart < 0)
-            {
-                _integerPart--;
-                _fractionalPart += FractionMax;
-            }
-        }
-
-        //we need to Update sign based on the current state
-        private void UpdateSign()
-        {
-            if (_integerPart < 0)
-            {
-                _sign = '-';
-                _integerPart = Math.Abs(_integerPart);
-            }
-            else if (_integerPart == 0 && _fractionalPart == 0)
-            {
-                _sign = '+';
-            }
         }
     }
 
@@ -230,7 +226,6 @@ namespace Victor_Project_1
         static void Main(string[] args)
         {
             // for us to get the user input for the money creation
-
             Console.WriteLine("Enter currency (USD, RUB, EUR):");
             Currency currency = (Currency)Enum.Parse(typeof(Currency), Console.ReadLine().ToUpper());
 
@@ -238,32 +233,20 @@ namespace Victor_Project_1
             char sign = Console.ReadLine()[0];
 
             Console.WriteLine("Enter integer part:");
-            int integerPart = int.Parse(Console.ReadLine());
+            uint integerPart = uint.Parse(Console.ReadLine());
 
             Console.WriteLine("Enter fractional part (0 to 99):");
-            int fractionalPart = int.Parse(Console.ReadLine());
+            uint fractionalPart = uint.Parse(Console.ReadLine());
 
             Money m1 = new Money(currency, sign, integerPart, fractionalPart);
             Console.WriteLine("Created money object: " + m1.Display());
 
-            // Perform some operations for testing
+            // And let's perform some operations for testing
             m1.Add('+', 20, 75);
             Console.WriteLine("After addition: " + m1.Display());
 
-            m1.Subtract('-', 10, 15);
+            m1.Subtract('+', 10, 15);
             Console.WriteLine("After subtraction: " + m1.Display());
-
-            Money m2 = m1.ConvertToCurrency(Currency.EUR, 0.85M);
-            Console.WriteLine("Converted to EUR: " + m2.Display());
-
-            Money m3 = new Money(m1);
-            Console.WriteLine("Copy of m1: " + m3.Display());
-
-            Money m4 = m1.Sum(m2);
-            Console.WriteLine("Sum of m1 and m2: " + m4.Display());
-
-            Money m5 = m1.Difference(m2);
-            Console.WriteLine("Difference between m1 and m2: " + m5.Display());
         }
     }
 }
